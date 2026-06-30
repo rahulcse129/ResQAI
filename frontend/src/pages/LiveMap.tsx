@@ -218,6 +218,17 @@ const LiveMap = () => {
           </button>
         </div>
       </div>
+      <div className="bg-yellow-500/10 border-b border-gray-800/80 px-4 py-3 text-sm text-yellow-200/90 flex flex-col md:flex-row md:items-center justify-between gap-3 z-10 relative">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={18} className="text-yellow-500 shrink-0" />
+          <span>
+            <strong>Production Mode:</strong> Displaying verified real-time disaster feeds. Shelters and NGO data will be integrated from official government APIs in future updates.
+          </span>
+        </div>
+        <div className="text-xs md:text-sm text-yellow-400 font-medium bg-yellow-950/40 px-3 py-1 rounded border border-yellow-500/20 self-start md:self-auto">
+          💡 Click <strong>"Sync NASA"</strong> if disaster data is not fully displayed.
+        </div>
+      </div>
 
       <div className="flex-1 relative">
         {loading && (
