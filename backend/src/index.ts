@@ -147,9 +147,12 @@ app.get('/api/disasters/nasa', async (req, res) => {
       }
     }
 
-    // Fetch from NASA EONET v3 API
-    // We filter for active events only
-    const response = await axios.get('https://eonet.gsfc.nasa.gov/api/v3/events?status=open');
+    const response = await axios.get('https://eonet.gsfc.nasa.gov/api/v3/events?status=open', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 10000
+    });
     const events = response.data.events;
 
     // Transform data for the frontend Map
