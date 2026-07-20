@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
 import { motion } from 'framer-motion';
-import { Activity, Wind, AlertTriangle, Users, MapPin, HeartPulse, Sun, CloudRain, Snowflake, Building2, ShieldCheck, Phone, ExternalLink, Zap } from 'lucide-react';
+import { Activity, Wind, Users, MapPin, HeartPulse, Sun, CloudRain, Snowflake, Building2, ShieldCheck, Phone, ExternalLink, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { API_BASE_URL } from '../config';
 
@@ -265,10 +265,85 @@ const useDashboardData = () => {
   const availableCount = volunteerList.filter(p => p.availability === 'available').length;
   const busyCount = volunteerList.filter(p => p.availability === 'busy').length;
 
+  // Haversine Distance Helper (km)
+  const getDistanceInKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round(R * c);
+  };
+
+  // User location for distance matrix
+  const userLat = coords?.lat || 21.1702;
+  const userLng = coords?.lng || 72.8311;
+  const currWeather = weatherData ? weatherData.current : staticData?.weather;
+  const currCondition = currWeather?.condition || '';
+
+  // Location-Optimized Risk Score Calculation
+  let riskScore = 18;
+  let riskSeverity = 'SAFE';
+  let nearestDisasterName = '';
+  let nearestDistanceKm: number | null = null;
+  let riskDetailText = 'No active satellite-tracked natural hazards detected within monitoring radius.';
+
+  if (Array.isArray(nasaEvents) && nasaEvents.length > 0) {
+    const eventsWithDistance = nasaEvents.map((ev: any) => {
+      let lat = ev.position ? ev.position[0] : (ev.coordinates ? ev.coordinates[0] : 0);
+      let lng = ev.position ? ev.position[1] : (ev.coordinates ? ev.coordinates[1] : 0);
+      const dist = getDistanceInKm(userLat, userLng, lat, lng);
+      return { ...ev, distanceKm: dist };
+    });
+
+    eventsWithDistance.sort((a, b) => a.distanceKm - b.distanceKm);
+    const nearest = eventsWithDistance[0];
+    nearestDistanceKm = nearest.distanceKm;
+    nearestDisasterName = nearest.title || nearest.name || `${nearest.type || 'Disaster'} Alert`;
+
+    const distKm = nearestDistanceKm ?? 9999;
+
+    if (distKm <= 100) {
+      riskScore = 92;
+      riskSeverity = 'CRITICAL';
+    } else if (distKm <= 300) {
+      riskScore = 82;
+      riskSeverity = 'HIGH';
+    } else if (distKm <= 600) {
+      riskScore = 64;
+      riskSeverity = 'MODERATE';
+    } else if (distKm <= 1200) {
+      riskScore = 42;
+      riskSeverity = 'LOW';
+    } else {
+      riskScore = 20;
+      riskSeverity = 'SAFE';
+    }
+
+    const condLower = currCondition.toLowerCase();
+    if (condLower.includes('heavy rain') || condLower.includes('thunderstorm') || condLower.includes('storm') || condLower.includes('extreme')) {
+      riskScore = Math.min(100, riskScore + 12);
+    } else if (condLower.includes('rain') || condLower.includes('shower')) {
+      riskScore = Math.min(100, riskScore + 6);
+    }
+
+    riskDetailText = distKm <= 1200 
+      ? `Nearest NASA Hazard: ${nearestDisasterName} (${distKm} km away)`
+      : `Nearest NASA hazard is ${distKm} km away. Safe perimeter maintained.`;
+  }
+
   const data = {
     ...staticData,
+    riskScore,
+    riskSeverity,
+    nearestDisasterName,
+    nearestDistanceKm,
+    riskDetailText,
     activeAlerts: nasaEvents ? nasaEvents.length : 0,
-    weather: weatherData ? weatherData.current : staticData?.weather,
+    weather: currWeather,
     forecast: weatherData ? weatherData.hourly : [],
     volunteerList,
     totalProviders,
@@ -363,15 +438,35 @@ const Dashboard = () => {
 
       {/* Top Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel bg-surface/20 border-gray-800/50 backdrop-blur-md p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-gray-400 font-medium">Disaster Risk Score</h3>
-            <AlertTriangle className="text-warning" size={20} />
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-panel bg-surface/20 border-gray-800/50 backdrop-blur-md p-6 relative flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-gray-400 font-medium text-xs uppercase tracking-wider">Disaster Risk Score</h3>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                data.riskScore >= 75 ? 'bg-red-500/20 text-red-400 border border-red-500/40' :
+                data.riskScore >= 45 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' :
+                'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+              }`}>
+                {data.riskSeverity || 'OPTIMIZED'}
+              </span>
+            </div>
+            <div className="text-4xl font-black text-white mb-2">
+              {data.riskScore}<span className="text-sm font-normal text-gray-500">/100</span>
+            </div>
+            <div className="w-full bg-gray-800 rounded-full h-2 mb-3">
+              <div 
+                className={`h-2 rounded-full transition-all duration-500 ${
+                  data.riskScore >= 75 ? 'bg-gradient-to-r from-amber-500 to-red-500' :
+                  data.riskScore >= 45 ? 'bg-gradient-to-r from-yellow-400 to-amber-500' :
+                  'bg-gradient-to-r from-emerald-500 to-teal-400'
+                }`} 
+                style={{ width: `${data.riskScore}%` }}
+              ></div>
+            </div>
           </div>
-          <div className="text-4xl font-bold text-white mb-2">{data.riskScore}<span className="text-lg text-gray-500">/100</span></div>
-          <div className="w-full bg-gray-800 rounded-full h-2">
-            <div className="bg-gradient-to-r from-yellow-500 to-red-500 h-2 rounded-full" style={{ width: `${data.riskScore}%` }}></div>
-          </div>
+          <p className="text-[11px] text-gray-300 font-medium bg-gray-900/60 p-2 rounded border border-gray-800 leading-tight">
+            {data.riskDetailText}
+          </p>
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-panel bg-surface/20 border-gray-800/50 backdrop-blur-md p-6">
