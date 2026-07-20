@@ -1,0 +1,58 @@
+[
+  {
+    "_id": "6a5e54be7a42eb47d365b6ea",
+    "userId": "mock_ngo_user_2026",
+    "type": "ngo",
+    "name": "All India Relief NGO",
+    "organizationName": "All India Relief NGO",
+    "registrationNumber": "GJ/2026/089123",
+    "contact": {
+      "phone": "+91 9876543210",
+      "email": "ngo@resqai.org"
+    },
+    "location": {
+      "lat": 23.1601,
+      "lng": 72.6576,
+      "address": "",
+      "city": "Surat",
+      "state": "Gujarat",
+      "country": "India"
+    },
+    "servicesOffered": [
+      "shelter",
+      "food_water"
+    ],
+    "availability": "busy",
+    "description": "",
+    "verified": false,
+    "createdAt": "2026-07-20T17:02:54.087Z",
+    "updatedAt": "2026-07-20T17:03:09.855Z"
+  },
+  {
+    "_id": "6a5e54e67a42eb47d365b6eb",
+    "userId": "mock_ind_user_2026",
+    "type": "individual",
+    "name": "Dr. Rajesh Sharma",
+    "contact": {
+      "phone": "+91 9123456789",
+      "email": "volunteer@resqai.org"
+    },
+    "location": {
+      "lat": 21.1702,
+      "lng": 72.8311,
+      "address": "",
+      "city": "Surat",
+      "state": "Gujarat",
+      "country": "India"
+    },
+    "servicesOffered": [
+      "shelter",
+      "food_water"
+    ],
+    "availability": "available",
+    "description": "",
+    "verified": false,
+    "createdAt": "2026-07-20T17:03:34.622Z",
+    "updatedAt": "2026-07-20T17:19:29.718Z"
+  }
+]

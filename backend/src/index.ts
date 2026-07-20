@@ -381,7 +381,478 @@ const reportSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'resqai_super_secret_jwt_key_2026';
+
 const Report = mongoose.model('Report', reportSchema);
+
+// Volunteer Workplace & User DB Backup Paths
+const VOLUNTEERS_DB_PATH = path.join(__dirname, '../volunteers_db.json');
+const REQUESTS_DB_PATH = path.join(__dirname, '../requests_db.json');
+const USERS_DB_PATH = path.join(__dirname, '../users_db.json');
+
+export interface IUser {
+  _id: string;
+  email: string;
+  passwordHash: string;
+  role: 'individual' | 'ngo';
+  name: string;
+  phone: string;
+  darpanId?: string;
+  providerId?: string;
+  emailVerified: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IVolunteer {
+  _id: string;
+  userId?: string;
+  type: 'individual' | 'ngo';
+  name: string;
+  organizationName?: string;
+  registrationNumber?: string;
+  contact: {
+    phone: string;
+    email: string;
+  };
+  location: {
+    lat: number;
+    lng: number;
+    address: string;
+    city: string;
+    state: string;
+    country: string;
+  };
+  servicesOffered: string[];
+  capacity?: string;
+  availability: 'available' | 'busy' | 'unavailable';
+  description?: string;
+  verified: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IServiceRequest {
+  _id: string;
+  providerId: string;
+  requesterUserId?: string;
+  requesterName: string;
+  requesterType: 'individual' | 'ngo' | 'authority';
+  requesterContact: {
+    phone: string;
+    email: string;
+  };
+  serviceNeeded: string;
+  urgency: 'low' | 'medium' | 'high' | 'critical';
+  message: string;
+  location?: {
+    lat?: number;
+    lng?: number;
+    address?: string;
+  };
+  status: 'pending' | 'accepted' | 'declined' | 'completed';
+  createdAt: string;
+  updatedAt: string;
+}
+
+// JSON Fallback Helpers for Users
+function loadUsersFromFile(): IUser[] {
+  try {
+    if (fs.existsSync(USERS_DB_PATH)) {
+      const data = fs.readFileSync(USERS_DB_PATH, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Failed to read from users_db.json:', error);
+  }
+  return [];
+}
+
+function saveUserToFile(user: IUser) {
+  try {
+    const items = loadUsersFromFile();
+    items.push(user);
+    fs.writeFileSync(USERS_DB_PATH, JSON.stringify(items, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Failed to write to users_db.json:', error);
+  }
+}
+
+function updateUserInFile(id: string, updateData: Partial<IUser>): IUser | null {
+  try {
+    const items = loadUsersFromFile();
+    const idx = items.findIndex(u => u._id === id);
+    if (idx !== -1) {
+      items[idx] = { ...items[idx], ...updateData, updatedAt: new Date().toISOString() };
+      fs.writeFileSync(USERS_DB_PATH, JSON.stringify(items, null, 2), 'utf8');
+      return items[idx];
+    }
+  } catch (error) {
+    console.error('Failed to update users_db.json:', error);
+  }
+  return null;
+}
+
+// JSON Fallback Helpers for Volunteers & Requests
+function loadVolunteersFromFile(): IVolunteer[] {
+  try {
+    if (fs.existsSync(VOLUNTEERS_DB_PATH)) {
+      const data = fs.readFileSync(VOLUNTEERS_DB_PATH, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Failed to read from volunteers_db.json:', error);
+  }
+  return [];
+}
+
+function saveVolunteerToFile(vol: IVolunteer) {
+  try {
+    const items = loadVolunteersFromFile();
+    items.push(vol);
+    fs.writeFileSync(VOLUNTEERS_DB_PATH, JSON.stringify(items, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Failed to write to volunteers_db.json:', error);
+  }
+}
+
+function updateVolunteerInFile(id: string, updateData: Partial<IVolunteer>): IVolunteer | null {
+  try {
+    const items = loadVolunteersFromFile();
+    const idx = items.findIndex(v => v._id === id);
+    if (idx !== -1) {
+      items[idx] = { ...items[idx], ...updateData, updatedAt: new Date().toISOString() };
+      fs.writeFileSync(VOLUNTEERS_DB_PATH, JSON.stringify(items, null, 2), 'utf8');
+      return items[idx];
+    }
+  } catch (error) {
+    console.error('Failed to update volunteers_db.json:', error);
+  }
+  return null;
+}
+
+function deleteVolunteerFromFile(id: string): boolean {
+  try {
+    let items = loadVolunteersFromFile();
+    const lenBefore = items.length;
+    items = items.filter(v => v._id !== id);
+    if (items.length !== lenBefore) {
+      fs.writeFileSync(VOLUNTEERS_DB_PATH, JSON.stringify(items, null, 2), 'utf8');
+      return true;
+    }
+  } catch (error) {
+    console.error('Failed to delete from volunteers_db.json:', error);
+  }
+  return false;
+}
+
+function loadRequestsFromFile(): IServiceRequest[] {
+  try {
+    if (fs.existsSync(REQUESTS_DB_PATH)) {
+      const data = fs.readFileSync(REQUESTS_DB_PATH, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Failed to read from requests_db.json:', error);
+  }
+  return [];
+}
+
+function saveRequestToFile(reqItem: IServiceRequest) {
+  try {
+    const items = loadRequestsFromFile();
+    items.push(reqItem);
+    fs.writeFileSync(REQUESTS_DB_PATH, JSON.stringify(items, null, 2), 'utf8');
+  } catch (error) {
+    console.error('Failed to write to requests_db.json:', error);
+  }
+}
+
+function updateRequestInFile(requestId: string, updateData: Partial<IServiceRequest>): IServiceRequest | null {
+  try {
+    const items = loadRequestsFromFile();
+    const idx = items.findIndex(r => r._id === requestId);
+    if (idx !== -1) {
+      items[idx] = { ...items[idx], ...updateData, updatedAt: new Date().toISOString() };
+      fs.writeFileSync(REQUESTS_DB_PATH, JSON.stringify(items, null, 2), 'utf8');
+      return items[idx];
+    }
+  } catch (error) {
+    console.error('Failed to update requests_db.json:', error);
+  }
+  return null;
+}
+
+// Mongoose Schemas
+const userSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  passwordHash: { type: String, required: true },
+  role: { type: String, enum: ['individual', 'ngo'], required: true },
+  name: { type: String, required: true },
+  phone: { type: String, required: true },
+  darpanId: String,
+  providerId: String,
+  emailVerified: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+const volunteerSchema = new mongoose.Schema({
+  userId: String,
+  type: { type: String, enum: ['individual', 'ngo'], required: true },
+  name: { type: String, required: true },
+  organizationName: String,
+  registrationNumber: String,
+  contact: {
+    phone: { type: String, required: true },
+    email: { type: String, required: true }
+  },
+  location: {
+    lat: { type: Number, required: true },
+    lng: { type: Number, required: true },
+    address: { type: String, default: '' },
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    country: { type: String, default: '' }
+  },
+  servicesOffered: [{ type: String }],
+  capacity: String,
+  availability: { type: String, enum: ['available', 'busy', 'unavailable'], default: 'available' },
+  description: String,
+  verified: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+const serviceRequestSchema = new mongoose.Schema({
+  providerId: { type: String, required: true },
+  requesterUserId: String,
+  requesterName: { type: String, required: true },
+  requesterType: { type: String, enum: ['individual', 'ngo', 'authority'], required: true },
+  requesterContact: {
+    phone: { type: String, required: true },
+    email: { type: String, required: true }
+  },
+  serviceNeeded: { type: String, required: true },
+  urgency: { type: String, enum: ['low', 'medium', 'high', 'critical'], required: true },
+  message: { type: String, required: true },
+  location: {
+    lat: Number,
+    lng: Number,
+    address: String
+  },
+  status: { type: String, enum: ['pending', 'accepted', 'declined', 'completed'], default: 'pending' },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now }
+});
+
+const User = mongoose.model('User', userSchema);
+const Volunteer = mongoose.model('Volunteer', volunteerSchema);
+const ServiceRequest = mongoose.model('ServiceRequest', serviceRequestSchema);
+
+// Authentication Middleware
+export const requireAuth = async (req: any, res: any, next: any) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required. Please log in.' });
+    }
+    const token = authHeader.split(' ')[1];
+    const decoded: any = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+  }
+};
+
+// ==========================================
+// AUTHENTICATION REST API ENDPOINTS
+// ==========================================
+
+// Signup
+app.post('/api/auth/signup', async (req, res) => {
+  try {
+    const { email, password, role, name, phone, darpanId } = req.body;
+
+    if (!email || !password || !role || !name || !phone) {
+      return res.status(400).json({ error: 'Missing required fields (email, password, role, name, phone).' });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters long.' });
+    }
+
+    if (!['individual', 'ngo'].includes(role)) {
+      return res.status(400).json({ error: 'Role must be either individual or ngo.' });
+    }
+
+    const cleanEmail = String(email).toLowerCase().trim();
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    if (isMongoConnected) {
+      const existing = await User.findOne({ email: cleanEmail });
+      if (existing) {
+        return res.status(409).json({ error: 'An account with this email address already exists.' });
+      }
+
+      const user = new User({
+        email: cleanEmail,
+        passwordHash,
+        role,
+        name,
+        phone,
+        darpanId: role === 'ngo' ? darpanId : undefined,
+        emailVerified: false
+      });
+      await user.save();
+
+      const token = jwt.sign({ userId: user._id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+      const { passwordHash: _, ...userRes } = user.toObject();
+      return res.status(201).json({ token, user: userRes });
+    } else {
+      const fileUsers = loadUsersFromFile();
+      const existing = fileUsers.find(u => u.email.toLowerCase() === cleanEmail);
+      if (existing) {
+        return res.status(409).json({ error: 'An account with this email address already exists.' });
+      }
+
+      const newUser: IUser = {
+        _id: new mongoose.Types.ObjectId().toString(),
+        email: cleanEmail,
+        passwordHash,
+        role,
+        name,
+        phone,
+        darpanId: role === 'ngo' ? darpanId : undefined,
+        emailVerified: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      saveUserToFile(newUser);
+
+      const token = jwt.sign({ userId: newUser._id, role: newUser.role, email: newUser.email }, JWT_SECRET, { expiresIn: '7d' });
+      const { passwordHash: _, ...userRes } = newUser;
+      return res.status(201).json({ token, user: userRes });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+
+    const cleanEmail = String(email).toLowerCase().trim();
+
+    if (isMongoConnected) {
+      const user = await User.findOne({ email: cleanEmail });
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const match = await bcrypt.compare(password, user.passwordHash);
+      if (!match) {
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const token = jwt.sign({ userId: user._id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+      const { passwordHash: _, ...userRes } = user.toObject();
+      return res.json({ token, user: userRes });
+    } else {
+      const fileUsers = loadUsersFromFile();
+      const user = fileUsers.find(u => u.email.toLowerCase() === cleanEmail);
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const match = await bcrypt.compare(password, user.passwordHash);
+      if (!match) {
+        return res.status(401).json({ error: 'Invalid email or password.' });
+      }
+
+      const token = jwt.sign({ userId: user._id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+      const { passwordHash: _, ...userRes } = user;
+      return res.json({ token, user: userRes });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Current User (/api/auth/me)
+app.get('/api/auth/me', requireAuth, async (req: any, res: any) => {
+  try {
+    const { userId } = req.user;
+    if (isMongoConnected) {
+      const user = await User.findById(userId).select('-passwordHash');
+      if (!user) return res.status(404).json({ error: 'User not found.' });
+      return res.json(user);
+    } else {
+      const fileUsers = loadUsersFromFile();
+      const user = fileUsers.find(u => u._id === userId);
+      if (!user) return res.status(404).json({ error: 'User not found.' });
+      const { passwordHash: _, ...userRes } = user;
+      return res.json(userRes);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Logout
+app.post('/api/auth/logout', (req, res) => {
+  res.json({ success: true, message: 'Logged out successfully.' });
+});
+
+// Forgot Password (simulated token log)
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email address is required.' });
+
+    const resetToken = `reset_${Math.random().toString(36).substring(2, 12)}`;
+    console.log(`[AUTH DEBUG] Reset token generated for ${email}: ${resetToken}`);
+    return res.json({ success: true, message: 'Password reset link sent to email (check console logs for token).' });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reset Password
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: 'Valid email and a minimum 8-character password are required.' });
+    }
+
+    const cleanEmail = String(email).toLowerCase().trim();
+    const newHash = await bcrypt.hash(newPassword, 10);
+
+    if (isMongoConnected) {
+      const user = await User.findOneAndUpdate({ email: cleanEmail }, { passwordHash: newHash }, { new: true });
+      if (!user) return res.status(404).json({ error: 'User account not found.' });
+      return res.json({ success: true, message: 'Password updated successfully. Please log in.' });
+    } else {
+      const fileUsers = loadUsersFromFile();
+      const user = fileUsers.find(u => u.email.toLowerCase() === cleanEmail);
+      if (!user) return res.status(404).json({ error: 'User account not found.' });
+      updateUserInFile(user._id, { passwordHash: newHash });
+      return res.json({ success: true, message: 'Password updated successfully. Please log in.' });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.post('/api/reports', async (req, res) => {
   try {
@@ -425,6 +896,396 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
+// ==========================================
+// VOLUNTEER WORKPLACE REST API ENDPOINTS
+// ==========================================
+
+// Register a new provider (with automatic User linking)
+app.post('/api/volunteers/register', async (req: any, res: any) => {
+  try {
+    const { type, name, organizationName, registrationNumber, contact, location, servicesOffered, capacity, availability, description, userId } = req.body;
+
+    if (!type || !name || !contact?.phone || !contact?.email || !location?.lat || !location?.lng || !servicesOffered || servicesOffered.length === 0) {
+      return res.status(400).json({ error: 'Missing required fields (type, name, phone, email, lat, lng, servicesOffered).' });
+    }
+
+    const cleanEmail = contact.email.toLowerCase().trim();
+    const effectiveUserId = userId || (req.user ? req.user.userId : undefined);
+
+    if (isMongoConnected) {
+      // Check if user or email already has a provider
+      let existingVol = await Volunteer.findOne({
+        $or: [
+          { 'contact.email': cleanEmail },
+          { 'contact.phone': contact.phone },
+          ...(effectiveUserId ? [{ userId: effectiveUserId }] : [])
+        ]
+      });
+
+      if (existingVol) {
+        // Update existing listing instead of creating duplicate
+        existingVol.type = type;
+        existingVol.name = name;
+        existingVol.organizationName = organizationName;
+        existingVol.registrationNumber = registrationNumber;
+        existingVol.contact = { phone: contact.phone, email: cleanEmail };
+        existingVol.location = location;
+        existingVol.servicesOffered = servicesOffered;
+        existingVol.capacity = capacity;
+        existingVol.availability = availability || 'available';
+        existingVol.description = description;
+        existingVol.updatedAt = new Date();
+        if (effectiveUserId) existingVol.userId = effectiveUserId;
+
+        await existingVol.save();
+
+        if (effectiveUserId) {
+          await User.findByIdAndUpdate(effectiveUserId, { providerId: existingVol._id });
+        }
+        return res.json(existingVol);
+      }
+
+      const volunteer = new Volunteer({
+        userId: effectiveUserId,
+        type,
+        name,
+        organizationName,
+        registrationNumber,
+        contact: { phone: contact.phone, email: cleanEmail },
+        location,
+        servicesOffered,
+        capacity,
+        availability: availability || 'available',
+        description,
+        verified: false
+      });
+      await volunteer.save();
+
+      if (effectiveUserId) {
+        await User.findByIdAndUpdate(effectiveUserId, { providerId: volunteer._id });
+      }
+
+      return res.status(201).json(volunteer);
+    } else {
+      const fileVolunteers = loadVolunteersFromFile();
+      let existingVol = fileVolunteers.find(v => 
+        v.contact.email.toLowerCase() === cleanEmail || 
+        v.contact.phone === contact.phone || 
+        (effectiveUserId && v.userId === effectiveUserId)
+      );
+
+      if (existingVol) {
+        const updated = updateVolunteerInFile(existingVol._id, {
+          type,
+          name,
+          organizationName,
+          registrationNumber,
+          contact: { phone: contact.phone, email: cleanEmail },
+          location,
+          servicesOffered,
+          capacity,
+          availability: availability || 'available',
+          description,
+          userId: effectiveUserId
+        });
+
+        if (effectiveUserId) {
+          updateUserInFile(effectiveUserId, { providerId: existingVol._id });
+        }
+        return res.json(updated || existingVol);
+      }
+
+      const newVol: IVolunteer = {
+        _id: new mongoose.Types.ObjectId().toString(),
+        userId: effectiveUserId,
+        type,
+        name,
+        organizationName,
+        registrationNumber,
+        contact: { phone: contact.phone, email: cleanEmail },
+        location: {
+          lat: location.lat,
+          lng: location.lng,
+          address: location.address || '',
+          city: location.city || '',
+          state: location.state || '',
+          country: location.country || ''
+        },
+        servicesOffered,
+        capacity,
+        availability: availability || 'available',
+        description,
+        verified: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      saveVolunteerToFile(newVol);
+
+      if (effectiveUserId) {
+        updateUserInFile(effectiveUserId, { providerId: newVol._id });
+      }
+
+      return res.status(201).json(newVol);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper to mask sensitive contact info on public listings
+const maskContactInfo = (vol: any) => {
+  const obj = typeof vol.toObject === 'function' ? vol.toObject() : { ...vol };
+  return {
+    ...obj,
+    contact: {
+      phone: 'Protected (Submit request to connect)',
+      email: 'Protected (Submit request to connect)'
+    }
+  };
+};
+
+// List/search providers with filters (contact info masked for public privacy)
+app.get('/api/volunteers', async (req, res) => {
+  try {
+    const { service, city, state, availability, type, search } = req.query;
+
+    if (isMongoConnected) {
+      const queryFilter: any = {};
+      if (service) queryFilter.servicesOffered = service;
+      if (city) queryFilter['location.city'] = new RegExp(String(city), 'i');
+      if (state) queryFilter['location.state'] = new RegExp(String(state), 'i');
+      if (availability) queryFilter.availability = availability;
+      if (type) queryFilter.type = type;
+      if (search) {
+        const regex = new RegExp(String(search), 'i');
+        queryFilter.$or = [
+          { name: regex },
+          { organizationName: regex },
+          { description: regex },
+          { 'location.city': regex },
+          { 'location.state': regex }
+        ];
+      }
+
+      const list = await Volunteer.find(queryFilter).sort({ updatedAt: -1 });
+      const masked = list.map(maskContactInfo);
+      return res.json(masked);
+    } else {
+      let list = loadVolunteersFromFile();
+      if (service) list = list.filter(v => v.servicesOffered.includes(String(service)));
+      if (city) list = list.filter(v => v.location.city.toLowerCase().includes(String(city).toLowerCase()));
+      if (state) list = list.filter(v => v.location.state.toLowerCase().includes(String(state).toLowerCase()));
+      if (availability) list = list.filter(v => v.availability === availability);
+      if (type) list = list.filter(v => v.type === type);
+      if (search) {
+        const s = String(search).toLowerCase();
+        list = list.filter(v => 
+          v.name.toLowerCase().includes(s) ||
+          (v.organizationName && v.organizationName.toLowerCase().includes(s)) ||
+          (v.description && v.description.toLowerCase().includes(s)) ||
+          v.location.city.toLowerCase().includes(s) ||
+          v.location.state.toLowerCase().includes(s)
+        );
+      }
+      list.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      const masked = list.map(maskContactInfo);
+      return res.json(masked);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get single provider details
+app.get('/api/volunteers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (isMongoConnected) {
+      const vol = await Volunteer.findById(id);
+      if (!vol) return res.status(404).json({ error: 'Provider not found' });
+      return res.json(vol);
+    } else {
+      const list = loadVolunteersFromFile();
+      const vol = list.find(v => v._id === id);
+      if (!vol) return res.status(404).json({ error: 'Provider not found' });
+      return res.json(vol);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update provider listing
+app.patch('/api/volunteers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    updateData.updatedAt = new Date();
+
+    if (isMongoConnected) {
+      const updated = await Volunteer.findByIdAndUpdate(id, updateData, { new: true });
+      if (!updated) return res.status(404).json({ error: 'Provider not found' });
+      return res.json(updated);
+    } else {
+      const updated = updateVolunteerInFile(id, updateData);
+      if (!updated) return res.status(404).json({ error: 'Provider not found' });
+      return res.json(updated);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete provider listing
+app.delete('/api/volunteers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (isMongoConnected) {
+      const deleted = await Volunteer.findByIdAndDelete(id);
+      if (!deleted) return res.status(404).json({ error: 'Provider not found' });
+      return res.json({ success: true, message: 'Provider listing deleted' });
+    } else {
+      const deleted = deleteVolunteerFromFile(id);
+      if (!deleted) return res.status(404).json({ error: 'Provider not found' });
+      return res.json({ success: true, message: 'Provider listing deleted' });
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Submit a service request to a provider
+app.post('/api/volunteers/:id/request', async (req, res) => {
+  try {
+    const providerId = req.params.id;
+    const { requesterName, requesterType, requesterContact, serviceNeeded, urgency, message, location } = req.body;
+
+    if (!requesterName || !requesterType || !requesterContact?.phone || !requesterContact?.email || !serviceNeeded || !urgency || !message) {
+      return res.status(400).json({ error: 'Missing required fields for request submission.' });
+    }
+
+    if (isMongoConnected) {
+      const vol = await Volunteer.findById(providerId);
+      if (!vol) return res.status(404).json({ error: 'Target provider not found.' });
+
+      const requestItem = new ServiceRequest({
+        providerId,
+        requesterName,
+        requesterType,
+        requesterContact,
+        serviceNeeded,
+        urgency,
+        message,
+        location,
+        status: 'pending'
+      });
+      await requestItem.save();
+      return res.status(201).json(requestItem);
+    } else {
+      const list = loadVolunteersFromFile();
+      const vol = list.find(v => v._id === providerId);
+      if (!vol) return res.status(404).json({ error: 'Target provider not found.' });
+
+      const newReq: IServiceRequest = {
+        _id: new mongoose.Types.ObjectId().toString(),
+        providerId,
+        requesterName,
+        requesterType,
+        requesterContact,
+        serviceNeeded,
+        urgency,
+        message,
+        location,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      saveRequestToFile(newReq);
+      return res.status(201).json(newReq);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// View requests sent to a specific provider
+app.get('/api/volunteers/:id/requests', async (req, res) => {
+  try {
+    const providerId = req.params.id;
+    if (isMongoConnected) {
+      const requests = await ServiceRequest.find({ providerId }).sort({ createdAt: -1 });
+      const vol = await Volunteer.findById(providerId);
+
+      const items = requests.map(r => {
+        const obj: any = r.toObject();
+        if (vol && (r.status === 'accepted' || r.urgency === 'critical')) {
+          obj.providerContact = vol.contact;
+        }
+        return obj;
+      });
+      return res.json(items);
+    } else {
+      const volList = loadVolunteersFromFile();
+      const vol = volList.find(v => v._id === providerId);
+      const requests = loadRequestsFromFile()
+        .filter(r => r.providerId === providerId)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .map(r => {
+          const obj: any = { ...r };
+          if (vol && (r.status === 'accepted' || r.urgency === 'critical')) {
+            obj.providerContact = vol.contact;
+          }
+          return obj;
+        });
+      return res.json(requests);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update request status (accepted | declined | completed)
+app.patch('/api/requests/:requestId', async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { status } = req.body;
+
+    if (!['pending', 'accepted', 'declined', 'completed'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status value.' });
+    }
+
+    if (isMongoConnected) {
+      const updated = await ServiceRequest.findByIdAndUpdate(
+        requestId,
+        { status, updatedAt: new Date() },
+        { new: true }
+      );
+      if (!updated) return res.status(404).json({ error: 'Service request not found.' });
+
+      const vol = await Volunteer.findById(updated.providerId);
+      const resObj: any = updated.toObject();
+      if (vol && (updated.status === 'accepted' || updated.urgency === 'critical')) {
+        resObj.providerContact = vol.contact;
+      }
+      return res.json(resObj);
+    } else {
+      const updated = updateRequestInFile(requestId, { status });
+      if (!updated) return res.status(404).json({ error: 'Service request not found.' });
+
+      const volList = loadVolunteersFromFile();
+      const vol = volList.find(v => v._id === updated.providerId);
+      const resObj: any = { ...updated };
+      if (vol && (updated.status === 'accepted' || updated.urgency === 'critical')) {
+        resObj.providerContact = vol.contact;
+      }
+      return res.json(resObj);
+    }
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
