@@ -105,6 +105,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: 'individual',
       name: customizedName || 'Dr. Rajesh Sharma',
       phone: '+91 9123456789',
+      providerId: 'mock_vol_provider_2026',
       emailVerified: true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()

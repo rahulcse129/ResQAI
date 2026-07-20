@@ -113,8 +113,8 @@ export default function VolunteerWorkplace() {
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null);
   const [requestModalProvider, setRequestModalProvider] = useState<Provider | null>(null);
 
-  // My Provider ID (from user profile or localStorage)
-  const myProviderId = user?.providerId || localStorage.getItem('resqai_my_provider_id');
+  // My Provider ID (from user profile, localStorage, or fallback for active user)
+  const myProviderId = user?.providerId || localStorage.getItem('resqai_my_provider_id') || (user ? `mock_prov_${user._id}` : null);
 
   // Request Form State
   const [requestForm, setRequestForm] = useState({
